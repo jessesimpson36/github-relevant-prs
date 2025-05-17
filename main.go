@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/gob"
 	"fmt"
 	"github.com/google/go-github/v72/github"
 	"os"
 )
+
+const cacheFile = "pull_requests.gob"
 
 func main() {
 	client := github.NewClient(nil).WithAuthToken(os.Getenv("GH_TOKEN"))
@@ -17,43 +20,41 @@ func main() {
 }
 
 func markNotificationsAsRead(ctx context.Context, client *github.Client) error {
-	opt := &github.PullRequestListOptions{}
-
 	var allPullRequests []*github.PullRequest
 
-	pullRequestBatch, response, err := client.PullRequests.List(ctx, "helm", "helm", opt)
-
-	if _, ok := err.(*github.RateLimitError); ok {
-		fmt.Println("hit rate limit")
-	}
-	if err != nil {
-		if response != nil && response.Status != "" {
-			return fmt.Errorf("error %w %s", err, response.Status)
-		} else {
-			return fmt.Errorf("error %w", err)
+	// Check if cached data exists
+	if fileExists(cacheFile) {
+		if err := loadFromFile(cacheFile, &allPullRequests); err != nil {
+			return fmt.Errorf("failed to load cache: %w", err)
 		}
-	}
-	allPullRequests = append(allPullRequests, pullRequestBatch...)
-
-	for {
-		pullRequestBatch, response, err := client.PullRequests.List(ctx, "helm", "helm", opt)
-
-		if _, ok := err.(*github.RateLimitError); ok {
-			fmt.Println("hit rate limit")
-		}
-		if err != nil {
-			if response != nil && response.Status != "" {
-				return fmt.Errorf("error %w %s", err, response.Status)
-			} else {
-				return fmt.Errorf("error %w", err)
+		fmt.Println("Loaded pull requests from cache")
+	} else {
+		opt := &github.PullRequestListOptions{}
+		for {
+			pullRequestBatch, response, err := client.PullRequests.List(ctx, "helm", "helm", opt)
+			if _, ok := err.(*github.RateLimitError); ok {
+				fmt.Println("hit rate limit")
 			}
+			if err != nil {
+				if response != nil && response.Status != "" {
+					return fmt.Errorf("error %w %s", err, response.Status)
+				} else {
+					return fmt.Errorf("error %w", err)
+				}
+			}
+			allPullRequests = append(allPullRequests, pullRequestBatch...)
+			if response.NextPage == 0 {
+				break
+			}
+			opt.Page = response.NextPage
+			fmt.Println("Page: ", opt.Page)
 		}
-		allPullRequests = append(allPullRequests, pullRequestBatch...)
-		if response.NextPage == 0 {
-			break
+
+		// Save to cache
+		if err := saveToFile(cacheFile, allPullRequests); err != nil {
+			return fmt.Errorf("failed to save cache: %w", err)
 		}
-		opt.Page = response.NextPage
-		fmt.Println("Page: ", opt.Page)
+		fmt.Println("Saved pull requests to cache")
 	}
 
 	var reviewablePullRequests []*github.PullRequest
@@ -66,8 +67,34 @@ func markNotificationsAsRead(ctx context.Context, client *github.Client) error {
 	}
 
 	fmt.Println("hi")
-
 	return nil
+}
+
+func saveToFile(filename string, data interface{}) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := gob.NewEncoder(file)
+	return encoder.Encode(data)
+}
+
+func loadFromFile(filename string, data interface{}) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := gob.NewDecoder(file)
+	return decoder.Decode(data)
+}
+
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
 }
 
 //func handleIssue(urlBytes []byte, client *github.Client, ctx context.Context, notification *github.Notification, url string) error {
