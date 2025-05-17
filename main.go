@@ -13,13 +13,13 @@ const cacheFile = "pull_requests.gob"
 func main() {
 	client := github.NewClient(nil).WithAuthToken(os.Getenv("GH_TOKEN"))
 	fmt.Println("Got client")
-	if err := markNotificationsAsRead(context.Background(), client); err != nil {
+	if err := handlePullRequests(context.Background(), client); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 }
 
-func markNotificationsAsRead(ctx context.Context, client *github.Client) error {
+func handlePullRequests(ctx context.Context, client *github.Client) error {
 	var allPullRequests []*github.PullRequest
 
 	// Check if cached data exists
