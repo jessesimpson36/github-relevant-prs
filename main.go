@@ -20,7 +20,17 @@ func main() {
 }
 
 func handlePullRequests(ctx context.Context, client *github.Client) error {
-	var allPullRequests []*github.PullRequest
+	gob.Register([]*github.PullRequest{})
+	gob.Register(github.PullRequest{})
+	gob.Register(github.User{})
+	gob.Register(github.Repository{})
+	gob.Register(github.Label{})
+	gob.Register(github.Milestone{})
+	gob.Register(github.PullRequestBranch{})
+	gob.Register(github.PullRequestLinks{})
+	gob.Register(github.PullRequestReview{})
+	gob.Register(github.PullRequestComment{})
+	allPullRequests := make([]*github.PullRequest, 0, 1000)
 
 	// Check if cached data exists
 	if fileExists(cacheFile) {
@@ -57,13 +67,48 @@ func handlePullRequests(ctx context.Context, client *github.Client) error {
 		fmt.Println("Saved pull requests to cache")
 	}
 
-	var reviewablePullRequests []*github.PullRequest
+	var allDetailedPrs []github.PullRequest
 	for _, pr := range allPullRequests {
-		fmt.Println(fmt.Sprintf("%v  %v", pr.GetMergeable(), pr.GetMergeableState()))
+
+		var detailedPr github.PullRequest
+		prFile := fmt.Sprintf("pr/%d.gob", *pr.Number)
+		if !fileExists(prFile) {
+			detailedPr, _, err := client.PullRequests.Get(ctx, "helm", "helm", *pr.Number)
+			if err != nil {
+				fmt.Printf("failed to fetch PR #%d: %v\n", *pr.Number, err)
+				continue
+			}
+			if err := os.MkdirAll("pr", 0755); err != nil {
+				return fmt.Errorf("failed to create pr directory: %w", err)
+			}
+			if err := saveToFile(prFile, detailedPr); err != nil {
+				fmt.Printf("failed to save PR #%d: %v\n", *pr.Number, err)
+			}
+		} else {
+			if err := loadFromFile(prFile, &detailedPr); err != nil {
+				fmt.Printf("failed to load PR #%d: %v\n", *pr.Number, err)
+				continue
+			}
+		}
+		allDetailedPrs = append(allDetailedPrs, detailedPr)
+	}
+
+	var reviewablePullRequests []*github.PullRequest
+	//var jessePullRequests []*github.PullRequest
+	for _, pr := range allDetailedPrs {
+		//if pr.GetUser() != nil && *pr.GetUser().Login == "jessesimpson36" {
+		//	jessePullRequests = append(jessePullRequests, &pr)
+		//}
 		if pr.Mergeable == nil || !*pr.Mergeable {
 			continue
 		}
-		reviewablePullRequests = append(reviewablePullRequests, pr)
+		if pr.GetMergeableState() == "dirty" || pr.GetMergeableState() == "blocked" || pr.GetMergeableState() == "unknown" {
+			continue
+		}
+		reviewablePullRequests = append(reviewablePullRequests, &pr)
+	}
+	for _, pr := range reviewablePullRequests {
+		fmt.Println(fmt.Sprintf("%v\tPR #%v\t%v", *pr.GetUser().Login, pr.GetNumber(), pr.GetTitle()))
 	}
 
 	fmt.Println("hi")
@@ -96,60 +141,3 @@ func fileExists(filename string) bool {
 	_, err := os.Stat(filename)
 	return err == nil
 }
-
-//func handleIssue(urlBytes []byte, client *github.Client, ctx context.Context, notification *github.Notification, url string) error {
-//	foundB := issuesNumRe.Find(urlBytes)
-//	issueNumber := numRe.Find(foundB)
-//	issueNumberStr := string(issueNumber)
-//	issueNumberInt, err := strconv.Atoi(issueNumberStr)
-//	if err != nil {
-//		return err
-//	}
-//	issue, _, err := client.Issues.Get(ctx, *notification.Repository.Owner.Login, *notification.Repository.Name, issueNumberInt)
-//	if err != nil {
-//		return err
-//	}
-//	if *issue.State == "closed" || *notification.Reason == "assign" {
-//		printInfo(notification, *issue.Title, issueNumberStr, url)
-//		idInt, err := strconv.Atoi(*notification.ID)
-//		if err != nil {
-//			return err
-//		}
-//		resp, err := client.Activity.MarkThreadDone(ctx, int64(idInt))
-//		if err != nil {
-//			return fmt.Errorf("error %w %s", err, resp.Status)
-//		}
-//		fmt.Println("Marked as done")
-//		fmt.Println()
-//	}
-//	return nil
-//}
-
-//func handlePR(urlBytes []byte, client *github.Client, ctx context.Context, notification *github.Notification, url string) error {
-//	foundB := pullsNumRe.Find(urlBytes)
-//	prNumber := numRe.Find(foundB)
-//	prNumberStr := string(prNumber)
-//	prNumberInt, err := strconv.Atoi(prNumberStr)
-//	if err != nil {
-//		return err
-//	}
-//
-//	pr, _, err := client.PullRequests.Get(ctx, *notification.Repository.Owner.Login, *notification.Repository.Name, prNumberInt)
-//	if err != nil {
-//		return err
-//	}
-//	if *pr.State == "closed" || *pr.Merged || *notification.Reason == "assign" {
-//		printInfo(notification, *pr.State, prNumberStr, url)
-//		idInt, err := strconv.Atoi(*notification.ID)
-//		if err != nil {
-//			return err
-//		}
-//		resp, err := client.Activity.MarkThreadDone(ctx, int64(idInt))
-//		if err != nil {
-//			return fmt.Errorf("error %w %s", err, resp.Status)
-//		}
-//		fmt.Println("Marked as done")
-//		fmt.Println()
-//	}
-//	return nil
-//}
