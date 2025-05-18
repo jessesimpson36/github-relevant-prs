@@ -1,4 +1,4 @@
-module github.com/jessesimpson36/github-notification-cleaner
+module github.com/jessesimpson36/github-relevant-prs
 
 go 1.23.0
 
